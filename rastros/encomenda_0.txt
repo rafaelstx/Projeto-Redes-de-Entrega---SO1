@@ -1,0 +1,8 @@
+Encomenda ID: 0
+Origem: 3
+Destino: 0
+Horário de Criação: 18:00:07
+Horário de Chegada ao Ponto de Origem: 18:00:07
+Horário de Carregamento no Veículo: 18:00:09
+ID do Veículo: 3
+Horário de Descarregamento no Destino: 18:00:18
