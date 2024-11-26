@@ -19,7 +19,7 @@ CONFIG = {
 
 # Classe que representa uma encomenda
 class Encomenda(threading.Thread):
-    def __init__(self, id, origem, destino, pontos):
+    def __init__(self, id, origem, destino, pontos, interface):
         super().__init__()
         self.id = id  # ID único da encomenda
         self.origem = origem  # Ponto de origem da encomenda
@@ -30,10 +30,13 @@ class Encomenda(threading.Thread):
         self.horario_descarregado = None  # Quando foi descarregada no destino
         self.veiculo_id = None  # ID do veículo que transportou a encomenda
         self.delivered_event = threading.Event()  # Evento para sinalizar entrega
+        self.interface = interface  # Referência para a interface
 
     def run(self):
         # Enfileira-se no ponto de origem
         self.pontos[self.origem].enqueue_encomenda(self)
+        # Atualiza a interface do ponto
+        self.interface.update_point(self.origem, self.pontos[self.origem].get_cargas())
         # Aguarda ser carregada no veículo
         while self.horario_carregado is None:
             time.sleep(0.1)
@@ -46,8 +49,6 @@ class Encomenda(threading.Thread):
         # Thread finaliza após entrega
 
     def gerar_rastro(self):
-        # Removido: Criação do diretório 'rastros' aqui, pois agora é feito no início da simulação
-
         # Formata os horários
         horario_criacao = time.strftime('%H:%M:%S', time.localtime(self.horario_criacao))
         horario_carregado = time.strftime('%H:%M:%S', time.localtime(self.horario_carregado))
@@ -58,7 +59,6 @@ class Encomenda(threading.Thread):
             f"Encomenda ID: {self.id}\n"
             f"Origem: {self.origem}\n"
             f"Destino: {self.destino}\n"
-            f"Horário de Criação: {horario_criacao}\n"
             f"Horário de Chegada ao Ponto de Origem: {horario_criacao}\n"  # Assumindo que chegou ao ponto ao ser criada
             f"Horário de Carregamento no Veículo: {horario_carregado}\n"
             f"ID do Veículo: {self.veiculo_id}\n"
@@ -102,17 +102,21 @@ class Veiculo(threading.Thread):
                 ponto_atual = self.pontos[self.local_atual]
 
                 # Carrega encomendas no veículo enquanto houver encomendas no ponto
-                while len(self.carga) < self.capacidade and not ponto_atual.fila_encomendas.empty():
+                while len(self.carga) < self.capacidade:
+                    encomenda = ponto_atual.get_encomenda()
+                    if encomenda is None:
+                        break
                     self.carga_semaphore.acquire()  # Adquire um espaço de carga
-                    encomenda = ponto_atual.fila_encomendas.get()
                     encomenda.horario_carregado = time.time()
                     encomenda.veiculo_id = self.id
                     self.carga.append(encomenda)
                     self.historico.append(f"Carregou encomenda {encomenda.id} no ponto {self.local_atual}")
                     self.interface.update_status(f"Veículo {self.id} carregou encomenda {encomenda.id} no ponto {self.local_atual}.")
+                    # Atualiza a interface do ponto
+                    self.interface.update_point(self.local_atual, ponto_atual.get_cargas())
 
             # Descarrega encomendas que chegaram ao destino
-            for encomenda in self.carga[:]:
+            for encomenda in self.carga[:]:  # Feito com a cópia da lista para não causar problemas com a modificação da própria lista
                 if encomenda.destino == self.local_atual:
                     # Simula tempo aleatório de descarregamento
                     time.sleep(random.uniform(1, 1.9))
@@ -130,7 +134,7 @@ class Veiculo(threading.Thread):
 
             # Move para o próximo ponto (cíclico)
             self.local_atual = (self.local_atual + 1) % len(self.pontos)
-            time.sleep(random.uniform(0.1, 0.3))  # Simula tempo de viagem
+            time.sleep(random.uniform(0.1, 0.6))  # Simula tempo de viagem
 
 # Classe que representa um ponto de redistribuição
 class Ponto(threading.Thread):
@@ -138,10 +142,23 @@ class Ponto(threading.Thread):
         super().__init__()
         self.id = id  # ID do ponto
         self.fila_encomendas = queue.Queue()  # Fila de encomendas no ponto
+        self.fila_lock = threading.Lock()  # Lock para acesso à fila
         self.running = True  # Controle para finalizar o thread
 
     def enqueue_encomenda(self, encomenda):
-        self.fila_encomendas.put(encomenda)
+        with self.fila_lock:
+            self.fila_encomendas.put(encomenda)
+
+    def get_encomenda(self):
+        with self.fila_lock:
+            if not self.fila_encomendas.empty():
+                return self.fila_encomendas.get()
+            else:
+                return None
+
+    def get_cargas(self):
+        with self.fila_lock:
+            return [encomenda.id for encomenda in list(self.fila_encomendas.queue)]
 
     def run(self):
         # O ponto pode realizar operações adicionais se necessário
@@ -153,7 +170,7 @@ class Interface:
     def __init__(self, master):
         self.master = master  # Janela principal do Tkinter
         self.master.title("Simulação de Logística")  # Título da janela
-        self.master.geometry("800x600")  # Dimensões da janela
+        self.master.geometry("800x800")  # Dimensões da janela
         self.master.configure(bg="#f5f5f5")  # Cor de fundo
 
         self.status_var = StringVar()  # Variável para exibir mensagens de status
@@ -198,6 +215,10 @@ class Interface:
         self.vehicles_frame = Frame(master, bg="#ffffff", relief="groove", bd=2)
         self.vehicles_frame.pack(fill=BOTH, padx=10, pady=5, expand=True)
 
+        # Área dos Pontos
+        self.points_frame = Frame(master, bg="#ffffff", relief="groove", bd=2)
+        self.points_frame.pack(fill=BOTH, padx=10, pady=5, expand=True)
+
         # Área do Histórico
         history_frame = Frame(master, bg="#f5f5f5")
         history_frame.pack(fill=BOTH, padx=10, pady=10, expand=True)
@@ -216,6 +237,10 @@ class Interface:
     # Atualiza a posição e carga do veículo
     def update_vehicle(self, vehicle_id, location, carga):
         self.master.after(0, lambda: self.vehicle_frames[vehicle_id].config(text=f"No ponto {location}, Carga: {carga}"))
+
+    # Atualiza o status de um ponto
+    def update_point(self, point_id, cargas):
+        self.master.after(0, lambda: self.point_frames[point_id].config(text=f"Cargas: {cargas}"))
 
     # Exibe o histórico final
     def display_results(self, results):
@@ -248,7 +273,7 @@ class Interface:
             CONFIG["capacidade_veiculo"] = A
             CONFIG["numero_encomendas"] = P
 
-            # Deleta e recria o diretório 'rastros' antes de iniciar a simulação
+            # Criação de pasta caso não exista
             if os.path.exists('rastros'):
                 shutil.rmtree('rastros')
             os.makedirs('rastros')
@@ -271,6 +296,18 @@ class Interface:
                 label = Label(frame, text="Aguardando...", font=("Arial", 10), bg="#ffffff")
                 label.pack(side="left")
                 self.vehicle_frames.append(label)
+
+            # Atualiza a interface para mostrar os pontos
+            Label(self.points_frame, text="Status dos Pontos", font=("Arial", 14, "bold"), bg="#ffffff").pack(pady=5)
+
+            self.point_frames = []
+            for i in range(S):
+                frame = Frame(self.points_frame, bg="#ffffff", pady=2)
+                frame.pack(fill=BOTH)
+                Label(frame, text=f"Ponto {i}:", font=("Arial", 10, "bold"), bg="#ffffff").pack(side="left", padx=10)
+                label = Label(frame, text="Cargas: []", font=("Arial", 10), bg="#ffffff")
+                label.pack(side="left")
+                self.point_frames.append(label)
 
             # Inicia a simulação em um thread separado
             threading.Thread(target=main, args=(self,), daemon=True).start()
@@ -311,7 +348,7 @@ def main(interface):
         destino = random.randint(0, S - 1)
         while destino == origem:
             destino = random.randint(0, S - 1)
-        encomenda = Encomenda(i, origem, destino, pontos)
+        encomenda = Encomenda(i, origem, destino, pontos, interface)
         encomendas.append(encomenda)
         encomenda.start()
 
@@ -321,7 +358,7 @@ def main(interface):
         destino = random.randint(0, S - 1)
         while destino == origem:
             destino = random.randint(0, S - 1)
-        encomenda = Encomenda(i, origem, destino, pontos)
+        encomenda = Encomenda(i, origem, destino, pontos, interface)
         encomendas.append(encomenda)
         encomenda.start()
 
