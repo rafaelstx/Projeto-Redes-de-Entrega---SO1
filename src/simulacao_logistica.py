@@ -84,7 +84,7 @@ class Veiculo(threading.Thread):
         self.local_atual = random.randint(0, len(pontos) - 1)  # Ponto inicial aleatório
         self.lock_pontos = lock_pontos  # Locks para sincronizar acesso aos pontos
         self.encomendas_restantes = encomendas_restantes  # Controle de encomendas pendentes
-        self.monitoramento_lock = monitoramento_lock  # Lock para sincronização de monitoramento
+        self.monitoramento_lock = monitoramento_lock  # Lock usado para sincronizar operações que alteram o número de encomendas restantes. Garante que dois veículos não reduzam o contador simultaneamente.
         self.interface = interface  # Referência para a interface gráfica
         self.historico = []  # Histórico de ações do veículo
 
@@ -98,7 +98,7 @@ class Veiculo(threading.Thread):
                     break
 
             # Acessa o ponto atual com lock para evitar conflitos
-            with self.lock_pontos[self.local_atual]:
+            with self.lock_pontos[self.local_atual]: # O lock do ponto atual impede que outro veículo acesse o mesmo ponto simultaneamente.
                 ponto_atual = self.pontos[self.local_atual]
 
                 # Carrega encomendas no veículo enquanto houver encomendas no ponto
@@ -107,9 +107,9 @@ class Veiculo(threading.Thread):
                     if encomenda is None:
                         break
                     self.carga_semaphore.acquire()  # Adquire um espaço de carga
-                    encomenda.horario_carregado = time.time()
-                    encomenda.veiculo_id = self.id
-                    self.carga.append(encomenda)
+                    encomenda.horario_carregado = time.time() # Informações sobre a encomenda são atualizadas
+                    encomenda.veiculo_id = self.id # Informações sobre a encomenda são atualizadas
+                    self.carga.append(encomenda) # A encomenda é adicionada à lista de carga do veículo
                     self.historico.append(f"Carregou encomenda {encomenda.id} no ponto {self.local_atual}")
                     self.interface.update_status(f"Veículo {self.id} carregou encomenda {encomenda.id} no ponto {self.local_atual}.")
                     # Atualiza a interface do ponto
@@ -120,11 +120,11 @@ class Veiculo(threading.Thread):
                 if encomenda.destino == self.local_atual:
                     # Simula tempo aleatório de descarregamento
                     time.sleep(random.uniform(1, 1.9))
-                    encomenda.horario_descarregado = time.time()
-                    self.carga.remove(encomenda)
+                    encomenda.horario_descarregado = time.time() #Atualiza o horário de descarregamento
+                    self.carga.remove(encomenda) # Remove a encomenda da carga do veículo
                     self.carga_semaphore.release()  # Libera um espaço de carga
                     with self.monitoramento_lock:
-                        self.encomendas_restantes[0] -= 1
+                        self.encomendas_restantes[0] -= 1 # Reduz o contador global de encomendas restantes 
                     encomenda.delivered_event.set()  # Sinaliza que a encomenda foi entregue
                     self.historico.append(f"Entregou encomenda {encomenda.id} no ponto {self.local_atual}")
                     self.interface.update_status(f"Veículo {self.id} entregou encomenda {encomenda.id} no ponto {self.local_atual}.")
@@ -142,21 +142,21 @@ class Ponto(threading.Thread):
         super().__init__()
         self.id = id  # ID do ponto
         self.fila_encomendas = queue.Queue()  # Fila de encomendas no ponto
-        self.fila_lock = threading.Lock()  # Lock para acesso à fila
-        self.running = True  # Controle para finalizar o thread
+        self.fila_lock = threading.Lock()  # Lock para acesso à fila. Garante que apenas um thread (veículo ou encomenda) possa modificar a fila por vez, evitando condições de corrida.
+        self.running = True  # Controle para finalizar o thread, enquanto for True, o método run continuará em execução
 
-    def enqueue_encomenda(self, encomenda):
+    def enqueue_encomenda(self, encomenda): # Adicionar uma encomenda na fila do ponto
         with self.fila_lock:
             self.fila_encomendas.put(encomenda)
 
-    def get_encomenda(self):
+    def get_encomenda(self): # Retirar uma encomenda da fila para que um veículo possa carregá-la
         with self.fila_lock:
-            if not self.fila_encomendas.empty():
-                return self.fila_encomendas.get()
+            if not self.fila_encomendas.empty(): # Verifica se a fila não está vazia
+                return self.fila_encomendas.get() # Se houver encomendas disponíveis, remove e retorna a encomenda
             else:
                 return None
 
-    def get_cargas(self):
+    def get_cargas(self): # Retornar uma lista com os IDs das encomendas atualmente na fila do ponto
         with self.fila_lock:
             return [encomenda.id for encomenda in list(self.fila_encomendas.queue)]
 
@@ -279,11 +279,11 @@ class Interface:
             os.makedirs('rastros')
 
             # Remove a área de entrada de parâmetros
-            self.entry_S.config(state='disabled')
+            self.entry_S.config(state='disabled') # Impede o usuário de alterar os parâmetros após o início da simulação
             self.entry_C.config(state='disabled')
             self.entry_A.config(state='disabled')
             self.entry_P.config(state='disabled')
-            self.start_button.config(state="disabled")  # Desativa o botão
+            self.start_button.config(state="disabled")  # Desativa o botão Iniciar Simulação
 
             # Atualiza a interface para mostrar os veículos
             Label(self.vehicles_frame, text="Status dos Veículos", font=("Arial", 14, "bold"), bg="#ffffff").pack(pady=5)
@@ -310,7 +310,9 @@ class Interface:
                 self.point_frames.append(label)
 
             # Inicia a simulação em um thread separado
-            threading.Thread(target=main, args=(self,), daemon=True).start()
+            # Passa a interface atual como argumento para que possa ser atualizada durante a simulação
+            # E o uso de daemon=True garante que o thread da simulação será encerrado automaticamente quando o programa for fechado.
+            threading.Thread(target=main, args=(self,), daemon=True).start() 
         except ValueError as ve:
             messagebox.showerror("Erro de Entrada", str(ve))
         except Exception as e:
@@ -326,14 +328,14 @@ def main(interface):
 
     # Cria os pontos
     pontos = [Ponto(i) for i in range(S)]
-    lock_pontos = [threading.Lock() for _ in range(S)]  # Locks para sincronizar acesso aos pontos
+    lock_pontos = [threading.Lock() for _ in range(S)]  # Cria uma lista de locks (threading.Lock) para garantir que apenas um veículo acesse um ponto de redistribuição por vez
 
     # Inicia os threads dos pontos
     for ponto in pontos:
         ponto.start()
 
     encomendas_restantes = [P]  # Contador global de encomendas pendentes
-    monitoramento_lock = threading.Lock()  # Lock para sincronização de monitoramento
+    monitoramento_lock = threading.Lock()  # Um lock para evitar condições de corrida durante a atualização do contador de encomendas pendentes
 
     # Cria os veículos
     veiculos = [Veiculo(i, pontos, A, lock_pontos, encomendas_restantes, monitoramento_lock, interface) for i in range(C)]
@@ -345,14 +347,14 @@ def main(interface):
     # Distribui as primeiras encomendas de forma que cada veículo tenha pelo menos uma encomenda para carregar
     for i, veiculo in enumerate(veiculos):
         origem = veiculo.local_atual  # Garante que o veículo encontre uma encomenda em seu local atual
-        destino = random.randint(0, S - 1)
+        destino = random.randint(0, S - 1) # O destino é gerado aleatoriamente, mas diferente da origem
         while destino == origem:
             destino = random.randint(0, S - 1)
         encomenda = Encomenda(i, origem, destino, pontos, interface)
         encomendas.append(encomenda)
-        encomenda.start()
+        encomenda.start() # Inicia os threads das encomendas
 
-    # Cria as demais encomendas
+    # Cria as demais encomendas (de C até P-1)
     for i in range(C, P):
         origem = random.randint(0, S - 1)
         destino = random.randint(0, S - 1)
@@ -362,11 +364,11 @@ def main(interface):
         encomendas.append(encomenda)
         encomenda.start()
 
-    # Aguarda todas as encomendas serem entregues
+    # Espera que todos os threads de encomendas sejam concluídos
     for encomenda in encomendas:
         encomenda.join()
 
-    # Aguarda todos os veículos finalizarem
+    # Espera que todos os threads dos veículos sejam encerrados
     for veiculo in veiculos:
         veiculo.join()
 
@@ -393,6 +395,7 @@ def main(interface):
 
 # Execução do programa
 if __name__ == "__main__":
-    root = Tk()
-    app = Interface(root)  # A interface agora não precisa receber num_veiculos
-    root.mainloop()
+    root = Tk() # Criação da Interface Gráfica
+    app = Interface(root)  # Inicialização da Interface
+    root.mainloop() # Inicia o loop principal da interface gráfica
+ 
