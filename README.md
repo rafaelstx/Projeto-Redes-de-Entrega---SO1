@@ -1,4 +1,5 @@
 # 🏢 Simulação de Logística com Threads em Python
+Rafael Teixeira e Luan Diniz
 
 Este projeto implementa uma simulação de logística utilizando threads em Python. O objetivo é modelar a interação entre encomendas, veículos e pontos de redistribuição em um sistema logístico, onde veículos transportam encomendas entre diferentes pontos, seguindo determinadas regras e restrições.
 
